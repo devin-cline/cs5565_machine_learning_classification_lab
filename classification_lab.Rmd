@@ -1,0 +1,251 @@
+---
+output:
+  word_document: default
+  html_document: default
+---
+```{r}
+library(MASS)
+library(caret)
+library(ggplot2)
+library(class)
+```
+***********************************
+Data input and preprocessing
+***********************************
+
+Read in Training and Testing Datasets.
+
+  Explanation of variables from https://cran.r-project.org/web/packages/MASS/MASS.pdf":
+  
+    npreg == number of pregnancies.
+    glu   == plasma glucose concentration in an oral glucose tolerance test.
+    bp    == diastolic blood pressure (mm Hg).
+    skin  == triceps skin fold thickness (mm).
+    bmi   == body mass index (weight in kg/(height in m)^2).
+    ped   == diabetes pedigree function.
+    age   == age in years.
+    type  == Yes or No, for diabetic according to WHO criteria.
+  
+```{r}
+data("Pima.te")
+df <- Pima.te
+head(df)
+```
+```{r}
+dim(df)
+```
+
+
+Replace "No" and "Yes" values with 0 and 1.
+```{r}
+df$type <- ifelse(df$type == "Yes", 1, 0)
+head(df)
+```
+
+Normalize data by creating new dataframe, scaling all features and then appending response column.
+
+(Note: this was not done in the "Logistic Regression" section but seemed like a good idea and was done in another section of the lab)
+
+
+```{r}
+df_norm <- data.frame(scale(df[,1:7]))
+df_norm$type <- df$type
+head(df_norm)
+```
+
+***********************************
+Logistic Regression
+***********************************
+
+Train  model based on all available features
+```{r}
+glm.fits <- glm(
+    type ~ .,
+    data = df_norm, family = binomial
+  )
+summary(glm.fits)
+```
+Analysis from above: The features that stand out with p-values below 0.05, in order of most significant, are glu, bmi, npreg, and ped. age, bp, and skin are not remotely significant.
+
+Display coefficients
+```{r}
+coef(glm.fits)
+```
+Display aspects of the fitted model
+```{r}
+summary(glm.fits)$coef
+```
+
+Display p-values of features
+```{r}
+summary(glm.fits)$coef[, 4]
+```
+Predict on training data
+```{r}
+glm.probs <- predict(glm.fits, type="response")
+glm.probs[1:10]
+```
+# contrasts() function not done as in lab because I chose to set the response variable was set to 0 or 1 for No or Yes, respectively
+
+Convert probabilities to predictions of class 0 or 1
+```{r}
+glm.pred <- rep(0, length(glm.probs))
+glm.pred[glm.probs > .5] = 1
+glm.pred[1:10]
+```
+Display confusion matrix
+```{r}
+table(predicted = glm.pred, actual = df_norm$type)
+```
+Calculate accuracy
+```{r}
+(201 + 63) / (201 + 46 + 22 + 63)
+```
+```{r}
+mean(glm.pred == df_norm$type)
+```
+
+
+Divide into training and testing sets. The lab divided based on year. I divide by random sample, using the approach from a previous course, Data Management and Data Mining in Business Analytics.
+```{r}
+set.seed(1)
+partition <- createDataPartition(p = 0.7, y = df_norm$type, list = FALSE)
+df_train <- df_norm[partition, ]
+df_test <- df_norm[-partition, ]
+dim(df_test)
+```
+
+Creating and test a new model using partition on all available features.
+```{r}
+glm.fits <- glm(type ~ ., data = df_train,
+    family = binomial)
+glm.probs <- predict(glm.fits, df_test,
+    type = "response")
+
+# convert probabilities to predictions of class 0 or 1
+glm.pred <- rep(0, length(glm.probs))
+glm.pred[glm.probs > .5] = 1
+
+# display confusion matrix
+table(predicted = glm.pred, actual = df_test$type)
+```
+Calculate accuracy
+```{r}
+mean(glm.pred == df_test$type)
+```
+
+Creating and test a new model, omitting features with p-values > 0.05.
+```{r}
+glm.fits <- glm(type ~ glu + npreg + ped + bmi, data = df_train,
+    family = binomial)
+glm.probs <- predict(glm.fits, df_test,
+    type = "response")
+
+# convert probabilities to predictions of class 0 or 1
+glm.pred <- rep(0, length(glm.probs))
+glm.pred[glm.probs > .5] = 1
+
+# display confusion matrix
+table(predicted = glm.pred, actual = df_test$type)
+```
+Calculate accuracy
+```{r}
+mean(glm.pred == df_test$type)
+```
+From the calculation below, we can see that when the model predicts diabetes, it is 79% accurate. This is a relatively small amount of cases though.
+```{r}
+19 / (19 + 5)
+```
+
+I'm not a medical expert so I'm not sure of what values to place in these parameters in order to use the model to predict on hypothetical cases. This was done just to attempt to mimic the lab. I am uncertain why the predictions are 1, when it seems like a decimal would be more likely. I could not find any errors but that could be causing it, or perhaps because of my lack of medical knowledge.
+```{r}
+predict(glm.fits,
+    newdata =
+      data.frame(glu = c(120, 160),  npreg = c(0, 8), ped = c(0.2, 0.6) , bmi = c(18, 30)),
+    type = "response"
+  )
+```
+Plot the logistic regression. I used the feature with lowest p-value, glu.
+```{r}
+ggplot(df_test, aes(x=glu, y=glm.pred)) + geom_point() + 
+  stat_smooth(method="glm", color="green", se=FALSE, method.args = list(family=binomial))
+```
+
+***********************************
+Linear Discriminant Analysis
+***********************************
+
+```{r}
+lda.fit <- lda(type ~ glu + npreg + ped + bmi, data = df_train)
+lda.fit
+```
+```{r}
+plot(lda.fit)
+```
+
+```{r}
+lda.pred <- predict(lda.fit, df_test)
+names(lda.pred)
+```
+```{r}
+lda.class <- lda.pred$class
+table(predicted = lda.class, actual = df_test$type)
+```
+```{r}
+mean(lda.class == df_test$type)
+```
+The final logistic regression and LDA provided the same results, which I found somewhat surprising. I reviewed the code to make sure there were no errors and found none. I also asked chatgpt to review the code and it only provided formatting suggestions, not logical ones. (I adopted the suggestion of labeling 'actual' and 'predicted' columns in the tables.) I also asked chatgpt what were some reasons why the results may be the same and it suggested: 
+
+1. The classes are easily linearly separable.
+2. Feature distribution is good for both LDA and logistic regression (normally distributed).
+3. There is a strong relationship between features.
+4. Small dataset 
+5. Appropriate features selected
+
+These reasons seem applicable to the analysis performed. Feature selection was performed based on p-values, a small dataset was used, the data was fairly normally distributed, and it seems reasonable to assume many of these health features are interrelated. 
+
+
+***********************************
+K-Nearest Neighbors
+***********************************
+
+Extract features of train and test sets into separate matrices.
+Extract training response variable.
+```{r}
+df_train_x = df_train[, c('glu', 'ped', 'bmi', 'npreg')]
+df_train_y = df_train$type
+df_test_x = df_test[, c('glu', 'ped', 'bmi', 'npreg')]
+
+# create knn model
+knn.pred <- knn(df_train_x, df_test_x, df_train_y, k=5)
+table(knn.pred, df_test$type)
+```
+Calculate accuracy
+```{r}
+(54 + 20) / (54 + 20 + 21 + 4)
+```
+
+Note: I first tried with k=1, as in the lab, and then with k=3 and then k=5. k=5 performed the best of the three.
+
+
+***********************************
+Questions
+***********************************
+
+A) 
+
+GLM: 72.73%
+LDA: 72.73%
+KNN: 74.74%
+
+KNN performed slightly better than the other two models. Perhaps this is because we have a relatively small dataset, 332 observations, which makes for less "smooth" distributions and makes k-nn better suited for flexibly finding patterns.The difference was pretty small though and the dataset was also fairly small so it might be unfair to look into it too much.
+
+
+B)
+
+In terms of interpretability, I think K-NN is easier to conceptualize for multivariate binary classification. We cannot conceptualize higher dimensional space well generally, and even when the number of features is greater than 1, I think it becomes easier to understand classifying data by the things that are 'close' to it than drawing boundaries based on functions in the case of LDA and logistic regression.
+
+C)
+
+Similar to my other responses, I suspect a relatively small dataset size has the largest limiting impact on the ability for the model to accurately classify. In class, we discussed medical classification and it seemed like performance closer to or above 80% would be desirable. Ultimately, I think a stronger understanding of medical knowledge and the ability to generate models with larger datasets would help me answer the question of what could be done to improved better (if anything).
+
